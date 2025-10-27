@@ -1,90 +1,63 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const { program } = require('commander');
-const fsp = fs.promises;
+import http from 'http';
+import fs from 'fs/promises';
+import path from 'path';
+import superagent from 'superagent';
+import { argv } from 'process';
 
-program
-  .requiredOption('-h, --host <host>', 'Адреса сервера')
-  .requiredOption('-p, --port <port>', 'Порт сервера')
-  .requiredOption('-c, --cache <dir>', 'Шлях до директорії кешу')
-  .parse(process.argv);
-
-const options = program.opts();
-
-const cacheDir = path.resolve(options.cache);
-
-if (!fs.existsSync(cacheDir)) {
-  fs.mkdirSync(cacheDir, { recursive: true });
-  console.log(`Директорія кешу створена: ${cacheDir}`);
-}
-
-function getFilePath(code) {
-  return path.join(cacheDir, `${code}.jpg`);
-}
+const host = '127.0.0.1';
+const port = 3000;
+const cacheDir = './cache';
 
 const server = http.createServer(async (req, res) => {
   const urlParts = req.url.split('/');
   const code = urlParts[1];
+  const filePath = path.join(cacheDir, `${code}.jpg`);
 
-   if (!code) {
-    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Помилка: не вказано HTTP код у запиті (наприклад /200)');
+  if (!code) {
+    res.statusCode = 400;
+    res.end('Bad Request');
     return;
   }
 
- const filePath = getFilePath(code);
-
- try {
-    switch (req.method) {
-      // ---------------------- GET ----------------------
-      case 'GET':
+  try {
+    if (req.method === 'GET') {
+      try {
+        const data = await fs.readFile(filePath);
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        res.end(data);
+      } catch {
         try {
-          const data = await fsp.readFile(filePath);
+          const response = await superagent.get(`https://http.cat/${code}.jpg`).responseType('blob');
+          const imageBuffer = response.body;
+          await fs.writeFile(filePath, imageBuffer); // зберегти в кеш
           res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-          res.end(data);
-        } catch {
-          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('404: Картинку не знайдено');
+          res.end(imageBuffer);
+        } catch (err) {
+          res.statusCode = 404;
+          res.end('Not Found');
         }
-        break;
-
-      // ---------------------- PUT ----------------------
-      case 'PUT':
-        const chunks = [];
-        req.on('data', chunk => chunks.push(chunk));
-        req.on('end', async () => {
-          const buffer = Buffer.concat(chunks);
-          await fsp.writeFile(filePath, buffer);
-          res.writeHead(201, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end(`Картинку для коду ${code} збережено`);
-        });
-        break;
-
-      // ---------------------- DELETE ----------------------
-      case 'DELETE':
-        try {
-          await fsp.unlink(filePath);
-          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end(`Картинку для коду ${code} видалено`);
-        } catch {
-          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('404: Картинку не знайдено для видалення');
-        }
-        break;
-
-      // ---------------------- Інші методи ----------------------
-      default:
-        res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('405: Метод не дозволено');
-        break;
+      }
+    } else if (req.method === 'PUT') {
+      const data = [];
+      for await (const chunk of req) data.push(chunk);
+      await fs.writeFile(filePath, Buffer.concat(data));
+      res.statusCode = 201;
+      res.end('Created');
+    } else if (req.method === 'DELETE') {
+      await fs.unlink(filePath);
+      res.statusCode = 200;
+      res.end('Deleted');
+    } else {
+      res.statusCode = 405;
+      res.end('Method Not Allowed');
     }
   } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Внутрішня помилка сервера: ' + err.message);
+    console.error(err);
+    res.statusCode = 500;
+    res.end('Internal Server Error');
   }
 });
 
-server.listen(options.port, options.host, () => {
-  console.log(`Сервер запущено: http://${options.host}:${options.port}`);
+server.listen(port, host, () => {
+  console.log(`Сервер запущено: http://${host}:${port}`);
 });
