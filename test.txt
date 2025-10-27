@@ -1,0 +1,18 @@
+#Запуск сервера 
+node index.js -h 127.0.0.1 -p 3000 -c ./cache
+
+ Додала картинку у кеш
+curl -X PUT http://127.0.0.1:3000/200 \
+     --header "Content-Type: image/jpeg" \
+     --data-binary "@./cache/200.jpg"
+
+Отримала картинку з кешу
+curl -X GET http://127.0.0.1:3000/200 --output downloaded_200.jpg
+
+Видалила картинку з кешу
+curl -X DELETE http://127.0.0.1:3000/200
+
+Додала картинку знову
+curl -X PUT http://127.0.0.1:3000/200 \
+     --header "Content-Type: image/jpeg" \
+     --data-binary "@./downloaded_200.jpg"
